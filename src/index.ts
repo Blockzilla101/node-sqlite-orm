@@ -178,7 +178,7 @@ export class SqliteOrm {
     private opts: OrmOptions;
     private lastModels: Record<string, Model> = {};
 
-    private constructor(options: OrmOptions) {
+    constructor(options: OrmOptions) {
         this.opts = options;
         if (this.opts.backupDir) {
             this.backupsEnabled = true;

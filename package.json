@@ -26,6 +26,6 @@
     "clean": "rm -rf dist",
     "lint": "eslint . --ext .ts",
     "fix": "eslint . --ext .ts --fix",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/test.ts"
   }
 }
