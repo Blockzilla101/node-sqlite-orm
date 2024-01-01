@@ -1,0 +1,8 @@
+src/
+*.db
+backup/
+*.db.model.json
+.vscode/
+.eslintrc.json
+.prettierrc.json
+tsconfig.json

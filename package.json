@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "description": "Simple sqlite orm for node.",
   "main": "dist/index.js",
-  "types": "dist/types.d.ts",
+  "types": "dist/index.d.ts",
   "author": "Blockzilla101",
   "license": "MIT",
   "type": "module",
+  "homepage": "https://github.com/Blockzilla101/node-sqlite-orm",
+  "readme": "https://github.com/Blockzilla101/node-sqlite-orm#readme",
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^20.10.6",
@@ -24,8 +26,9 @@
   "scripts": {
     "build": "yarn lint && tsc",
     "clean": "rm -rf dist",
-    "lint": "eslint . --ext .ts",
-    "fix": "eslint . --ext .ts --fix",
-    "dev": "tsx src/test.ts"
+    "lint": "eslint src/ --ext .ts --ignore-pattern src/test.ts",
+    "fix": "eslint src/ --ext .ts --fix --ignore-pattern src/test.ts",
+    "dev": "tsx src/test.ts",
+    "publish": "yarn build && npm publish"
   }
 }
