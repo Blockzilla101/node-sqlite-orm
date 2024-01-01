@@ -1,6 +1,6 @@
 {
   "name": "node-sqlite-orm",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Simple sqlite orm for node.",
   "main": "dist/index.js",
   "types": "dist/types.d.ts",
