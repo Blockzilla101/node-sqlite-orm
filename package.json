@@ -24,11 +24,14 @@
     "chalk": "^5.3.0"
   },
   "scripts": {
-    "build": "yarn lint && tsc",
+    "build": "yarn clean && yarn lint && tsc",
     "clean": "rm -rf dist",
     "lint": "eslint src/ --ext .ts --ignore-pattern src/test.ts",
     "fix": "eslint src/ --ext .ts --fix --ignore-pattern src/test.ts",
     "dev": "tsx src/test.ts",
-    "publish": "yarn build && npm publish"
-  }
+    "prepublishOnly": "yarn build"
+  },
+  "files": [
+    "dist/", "README.md", "LICENSE"
+  ]
 }
