@@ -1,6 +1,6 @@
 {
   "name": "node-sqlite-orm",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Simple sqlite orm for node.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -10,7 +10,6 @@
   "homepage": "https://github.com/Blockzilla101/node-sqlite-orm",
   "readme": "https://github.com/Blockzilla101/node-sqlite-orm#readme",
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^20.10.6",
     "@typescript-eslint/eslint-plugin": "^6.16.0",
     "@typescript-eslint/parser": "^6.16.0",
@@ -20,6 +19,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "@types/better-sqlite3": "^7.6.8",
     "better-sqlite3": "^9.2.2",
     "chalk": "^5.3.0"
   },
