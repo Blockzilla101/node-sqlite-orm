@@ -39,7 +39,7 @@ function getDefaultValue(type: ColumnType, value: any) {
         case 'integer':
             return value;
         case 'json':
-            return `'${jsonify(value)}'`;
+            return `'${JSON.stringify(jsonify(value))}'`;
         case 'string':
             return `'${value}'`;
         case 'blob':
