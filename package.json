@@ -30,7 +30,8 @@
     "lint": "eslint src/ --ext .ts --ignore-pattern src/test.ts",
     "fix": "eslint src/ --ext .ts --fix --ignore-pattern src/test.ts",
     "dev": "tsx src/test.ts",
-    "prepublishOnly": "yarn build"
+    "prepublishOnly": "yarn build",
+    "postinstall":  "tsc"
   },
   "files": [
     "dist/",
