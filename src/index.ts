@@ -1,4 +1,6 @@
-import SqliteDatabase from 'better-sqlite3';
+import sqlite3 from 'sqlite3';
+import { open, ISqlite } from 'sqlite';
+import sqlite from 'sqlite';
 import {
     buildAggregateQuery,
     buildAlterQuery,
@@ -27,7 +29,7 @@ interface OrmOptions {
     /**
      * sqlite3 open opts.
      */
-    openOptions?: SqliteDatabase.Options;
+    openOptions?: ISqlite.Config;
     /**
      * When set, backups are enabled.
      */
@@ -164,14 +166,12 @@ const gitCommit = spawnSync('git', ['rev-parse', 'HEAD'], {
     .trim();
 
 export class SqliteOrm {
-    public db: SqliteDatabase.Database;
+    public db!: sqlite.Database<sqlite3.Database, sqlite3.Statement>;
+    public models: Record<string, Model> = {};
     private hasChangesSinceBackup = false;
     private backupsEnabled = false;
     private hasModelChanges = false;
     private attachedDatabases: string[] = [];
-
-    public models: Record<string, Model> = {};
-
     private tempModelData: TableColumn[] = [];
     private ignoredColumns: string[] = [];
 
@@ -205,14 +205,26 @@ export class SqliteOrm {
 
         SqliteOrm.logInfo(this.opts, 'opening database');
 
-        this.db = new SqliteDatabase(options.dbPath, options.openOptions);
-
         this.lastModels = ModelReader.read(options.dbPath);
     }
 
+    public static logInfo: (dbOptions: OrmOptions, ...msg: any[]) => void = () => {};
+
     //#region table logic
 
-    public findOne<T extends SqlTable>(table: new () => T, idOrQuery: PrimitiveTypes | SelectQuery): T {
+    public static logDebug: (dbOptions: OrmOptions, ...msg: any[]) => void = () => {};
+
+    public async open() {
+        this.db = await open({
+            driver: sqlite3.Database,
+            filename: this.opts.dbPath,
+        });
+    }
+
+    public async findOne<T extends SqlTable>(
+        table: new () => T,
+        idOrQuery: PrimitiveTypes | SelectQuery
+    ): Promise<T> {
         if (this.models[table.name] == null) throw new DBModelNotFound(table);
 
         const col = this.models[table.name].columns.find((c) => c.isPrimaryKey);
@@ -234,7 +246,10 @@ export class SqliteOrm {
             this.models[table.name]
         );
 
-        const found = this.db.prepare(query.query).get(...query.params) as Record<string, unknown>;
+        const found = (await (await this.db.prepare(query.query)).get(...query.params)) as Record<
+            string,
+            unknown
+        >;
         if (!found) {
             if (typeof idOrQuery === 'object') {
                 throw new DBNotFound(`query did not match any items in ${table.name}`);
@@ -257,12 +272,12 @@ export class SqliteOrm {
         return parsed;
     }
 
-    public findOneOptional<T extends SqlTable>(
+    public async findOneOptional<T extends SqlTable>(
         table: new () => T,
         idOrQuery: PrimitiveTypes | SelectQuery
-    ): T {
+    ): Promise<T> {
         try {
-            return this.findOne(table, idOrQuery);
+            return await this.findOne(table, idOrQuery);
         } catch (e) {
             if (e instanceof DBNotFound) {
                 return new table();
@@ -271,12 +286,15 @@ export class SqliteOrm {
         }
     }
 
-    public findMany<T extends SqlTable>(table: new () => T, query: SelectQuery): T[] {
+    public async findMany<T extends SqlTable>(table: new () => T, query: SelectQuery): Promise<T[]> {
         if (this.models[table.name] == null) throw new DBModelNotFound(table);
 
         const builtQuery = buildSelectQuery(query, this.models[table.name]);
 
-        const data = this.db.prepare(builtQuery.query).all(...builtQuery.params) as Record<string, unknown>[];
+        const data = (await (await this.db.prepare(builtQuery.query)).all(...builtQuery.params)) as Record<
+            string,
+            unknown
+        >[];
         const parsedAll: T[] = [];
 
         for (const datum of data) {
@@ -294,26 +312,32 @@ export class SqliteOrm {
         return parsedAll;
     }
 
-    public countWhere<T extends SqlTable>(table: new () => T, query: WhereClause): number {
+    public async countWhere<T extends SqlTable>(table: new () => T, query: WhereClause): Promise<number> {
         if (this.models[table.name] == null) throw new DBModelNotFound(table);
 
         const builtQuery = buildCountWhereQuery(query, this.models[table.name]);
-        return (this.db.prepare(builtQuery.query).get(...builtQuery.params) as { 'COUNT(*)': number })[
-            'COUNT(*)'
-        ];
+        return (
+            (await (await this.db.prepare(builtQuery.query)).get(...builtQuery.params)) as {
+                'COUNT(*)': number;
+            }
+        )['COUNT(*)'];
     }
 
-    public aggregateSelect<Row extends Array<any>, T extends SqlTable = SqlTable>(
+    public async aggregateSelect<Row extends Array<any>, T extends SqlTable = SqlTable>(
         table: new () => T,
         query: AggregateSelectQuery
-    ): Row[] {
+    ): Promise<Row[]> {
         if (this.models[table.name] == null) throw new DBModelNotFound(table);
 
         const builtQuery = buildAggregateQuery(query, this.models[table.name]);
-        return this.db.prepare(builtQuery.query).all(...builtQuery.params) as Row[];
+        return (await (await this.db.prepare(builtQuery.query)).all(...builtQuery.params)) as Row[];
     }
 
-    public save<T extends SqlTable>(obj: T): T {
+    //#endregion table logic
+
+    //#region decorators
+
+    public async save<T extends SqlTable>(obj: T): Promise<T> {
         const model = this.models[obj.constructor.name];
         if (model == null) throw new DBModelNotFound(obj.constructor as typeof SqlTable);
 
@@ -327,32 +351,28 @@ export class SqliteOrm {
 
         if (obj._new) {
             const builtQuery = buildInsertQuery(model, builtData);
-            const result = this.db.prepare(builtQuery.query).run(...builtQuery.params);
+            const result = await (await this.db.prepare(builtQuery.query)).run(...builtQuery.params);
 
             const incrementPrimaryKey = model.columns.find((c) => c.isPrimaryKey && c.autoIncrement);
             if (incrementPrimaryKey) {
-                (obj as Record<string, unknown>)[incrementPrimaryKey.name] = result.lastInsertRowid;
+                (obj as Record<string, unknown>)[incrementPrimaryKey.name] = result.lastID;
             }
 
             obj._new = false;
         } else {
             const builtQuery = buildUpdateQuery(model, builtData);
-            this.db.prepare(builtQuery.query).run(...builtQuery.params);
+            await (await this.db.prepare(builtQuery.query)).run(...builtQuery.params);
         }
         this.hasChangesSinceBackup = true;
 
         return obj;
     }
 
-    public delete<T extends SqlTable>(table: new () => T, query: DeleteQuery) {
+    public async delete<T extends SqlTable>(table: new () => T, query: DeleteQuery) {
         const built = buildDeleteQuery(query, this.models[table.name]);
-        this.db.prepare(built.query).run(...built.params);
+        await (await this.db.prepare(built.query)).run(...built.params);
         this.hasChangesSinceBackup = true;
     }
-
-    //#endregion table logic
-
-    //#region decorators
 
     /**
      * Explicity set column type for a model otherwise its inferred from default value.
@@ -421,6 +441,10 @@ export class SqliteOrm {
         });
     }
 
+    //#endregion decorators
+
+    //#region logging
+
     /**
      * Property is not considered a column.
      */
@@ -440,7 +464,8 @@ export class SqliteOrm {
      * @param tableName name of table in database
      */
     public model(tableName?: string, database = 'main') {
-        return (model: new () => SqlTable) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        return (model: new () => SqlTable, ...args: unknown[]) => {
             const tempModel = new model();
             const hasPrimaryKey = this.tempModelData.find((i) => i.isPrimaryKey) != null;
 
@@ -494,77 +519,73 @@ export class SqliteOrm {
             this.models[model.name] = builtModel;
             this.tempModelData = [];
 
-            // create table if it doesn't exist
-            const info = this.db.prepare(`PRAGMA ${database}.table_info('${model.name}')`).all() as any[];
-            if (info.length === 0) {
-                this.hasModelChanges = true;
-                this.db.exec(buildTableQuery(builtModel));
-            } else {
-                // add missing columns
-                // const info = this.db.prepare(`PRAGMA ${database}.table_info('${model.name}')`);
-                buildAlterQuery(buildModelFromData(builtModel, info), builtModel).forEach((c: string) => {
+            (async () => {
+                // create table if it doesn't exist
+                const info = (await (
+                    await this.db.prepare(`PRAGMA ${database}.table_info('${model.name}')`)
+                ).all()) as any[];
+                if (info.length === 0) {
                     this.hasModelChanges = true;
-                    this.db.exec(c);
-                });
-            }
-
-            if (this.lastModels[model.name] == null) {
-                // new a model was added
-                this.hasModelChanges = true;
-                SqliteOrm.logInfo(this.opts, `found new table ${model.name}`);
-            } else {
-                const oldCols = this.lastModels[model.name].columns;
-                const newCols = builtModel.columns;
-                const oldDatabase = this.lastModels[model.name].database;
-
-                if (oldDatabase != null && oldDatabase !== database) {
-                    SqliteOrm.logInfo(this.opts, `database change from ${oldDatabase} to ${database}`);
-                    this.hasModelChanges = true;
+                    await this.db.exec(buildTableQuery(builtModel));
+                } else {
+                    // add missing columns
+                    // const info = this.db.prepare(`PRAGMA ${database}.table_info('${model.name}')`);
+                    for (const c of buildAlterQuery(buildModelFromData(builtModel, info), builtModel)) {
+                        this.hasModelChanges = true;
+                        await this.db.exec(c);
+                    }
                 }
 
-                for (const oldCol of oldCols) {
-                    const newCol = newCols.find(
-                        (c) => (c.mappedTo ?? c.name) === (oldCol.mappedTo ?? oldCol.name)
-                    );
-                    // missing col
-                    if (newCol == null) {
-                        SqliteOrm.logInfo(this.opts, `[${model.name}] column ${oldCol.name} was removed`);
+                if (this.lastModels[model.name] == null) {
+                    // new a model was added
+                    this.hasModelChanges = true;
+                    SqliteOrm.logInfo(this.opts, `found new table ${model.name}`);
+                } else {
+                    const oldCols = this.lastModels[model.name].columns;
+                    const newCols = builtModel.columns;
+                    const oldDatabase = this.lastModels[model.name].database;
+
+                    if (oldDatabase != null && oldDatabase !== database) {
+                        SqliteOrm.logInfo(this.opts, `database change from ${oldDatabase} to ${database}`);
                         this.hasModelChanges = true;
-                        continue;
                     }
 
-                    // changed col
-                    const diff = prettyPrintDiff(
-                        { ...oldCol, defaultValue: undefined },
-                        { ...newCol, defaultValue: undefined }
-                    );
-                    if (diff.length > 0) {
-                        this.hasModelChanges = true;
-                        SqliteOrm.logInfo(
-                            this.opts,
-                            `[${model.name}] column ${newCol.name} was changed: ${diff}`
+                    for (const oldCol of oldCols) {
+                        const newCol = newCols.find(
+                            (c) => (c.mappedTo ?? c.name) === (oldCol.mappedTo ?? oldCol.name)
                         );
+                        // missing col
+                        if (newCol == null) {
+                            SqliteOrm.logInfo(this.opts, `[${model.name}] column ${oldCol.name} was removed`);
+                            this.hasModelChanges = true;
+                            continue;
+                        }
+
+                        // changed col
+                        const diff = prettyPrintDiff(
+                            { ...oldCol, defaultValue: undefined },
+                            { ...newCol, defaultValue: undefined }
+                        );
+                        if (diff.length > 0) {
+                            this.hasModelChanges = true;
+                            SqliteOrm.logInfo(
+                                this.opts,
+                                `[${model.name}] column ${newCol.name} was changed: ${diff}`
+                            );
+                        }
+                    }
+
+                    // new col
+                    for (const newCol of newCols.filter(
+                        (c) => oldCols.find((o) => (o.mappedTo ?? o.name) === (c.mappedTo ?? c.name)) == null
+                    )) {
+                        SqliteOrm.logInfo(this.opts, `[${model.name}] column ${newCol.name} was added`);
+                        this.hasModelChanges = true;
                     }
                 }
-
-                // new col
-                for (const newCol of newCols.filter(
-                    (c) => oldCols.find((o) => (o.mappedTo ?? o.name) === (c.mappedTo ?? c.name)) == null
-                )) {
-                    SqliteOrm.logInfo(this.opts, `[${model.name}] column ${newCol.name} was added`);
-                    this.hasModelChanges = true;
-                }
-            }
+            })();
         };
     }
-
-    //#endregion decorators
-
-    //#region logging
-
-    public static logInfo: (dbOptions: OrmOptions, ...msg: any[]) => void = () => {};
-
-    public static logDebug: (dbOptions: OrmOptions, ...msg: any[]) => void = () => {};
 
     //#endregion logging
 
@@ -610,23 +631,6 @@ export class SqliteOrm {
         this.hasChangesSinceBackup = false;
     }
 
-    private backupDir() {
-        if (!this.opts.backupUseGitCommit) return this.opts.backupDir!;
-        return join(this.opts.backupDir!, gitBranch);
-    }
-
-    private backupName(type: 'auto' | 'model-changes' | 'manual') {
-        const dbName = basename(this.opts.dbPath);
-        if (this.opts.backupUseGitCommit) {
-            return `${type}-${new Date().toISOString()}-${gitCommit}-${dbName}`;
-        }
-        return `${type}-${new Date().toISOString()}-${dbName}`;
-    }
-
-    //#endregion backup
-
-    //#region misc
-
     /**
      * Cleanly close the database.
      */
@@ -652,16 +656,33 @@ export class SqliteOrm {
         this.saveModel();
     }
 
-    public attach(databasePath: string, name?: string) {
+    //#endregion backup
+
+    //#region misc
+
+    public async attach(databasePath: string, name?: string) {
         if (name == null) {
             name = basename(databasePath);
         }
 
         if (this.attachedDatabases.includes(name)) throw new DBError(`${databasePath} is already attached`);
-        this.db.prepare('ATTACH DATABASE ? AS ?').run(databasePath, name);
+        await (await this.db.prepare('ATTACH DATABASE ? AS ?')).run(databasePath, name);
         this.attachedDatabases.push(name);
 
         SqliteOrm.logInfo(this.opts, `attached ${databasePath} as ${name}`);
+    }
+
+    private backupDir() {
+        if (!this.opts.backupUseGitCommit) return this.opts.backupDir!;
+        return join(this.opts.backupDir!, gitBranch);
+    }
+
+    private backupName(type: 'auto' | 'model-changes' | 'manual') {
+        const dbName = basename(this.opts.dbPath);
+        if (this.opts.backupUseGitCommit) {
+            return `${type}-${new Date().toISOString()}-${gitCommit}-${dbName}`;
+        }
+        return `${type}-${new Date().toISOString()}-${dbName}`;
     }
 
     //#endregion misc
